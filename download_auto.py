@@ -18,7 +18,7 @@ save_path = 'D:\\ttt'  # file save path
 upload_file_set = False  # set upload file to google drive
 drive_id = '5FyJClXmsqNw0-Rz19'  # google teamdrive id 如果使用OD，删除''内的内容即可。
 drive_name = 'gc'  # rclone drive name
-max_num = 2  # 同时下载数量
+max_num = 5  # 同时下载数量
 maxsize = 10*max_num
 # filter file name/文件名过滤
 filter_list = ['你好，欢迎加入 Quantumu', '\n']
@@ -103,6 +103,7 @@ def check_file_exist(filename):
 
 async def worker(name):
     while True:
+        print("拿到文件")
         queue_item = await queue.get()
         message = queue_item[0]
         chat_title = queue_item[1]
@@ -129,51 +130,22 @@ async def worker(name):
         try:
             print(f"start download {offset_id}")
             download_path = os.path.join(file_save_path, file_name)
-            await client.download_media(message, download_path, progress_callback=save_success(file_name, offset_id))
-            await asyncio.wait_for(task, timeout=60)
+            await client.download_media(message, download_path)
+            print(f"stop download {offset_id}")
+
         except (errors.rpc_errors_re.FileReferenceExpiredError, asyncio.TimeoutError):
             logging.warning(f'{get_local_time()} - {offset_id} 出现异常，重新尝试下载！')
-            async for new_message in client.iter_messages(entity=entity, offset_id=message.id - 1, reverse=True,
-                                                          limit=1):
-                await queue.put((new_message, chat_title, entity, file_name, message.id))
+            # async for new_message in client.iter_messages(entity=entity, offset_id=message.id - 1, reverse=True,
+            #                                               limit=1):
+            await queue.put((message, chat_title, entity, file_name, message.id))
         except Exception as e:
             print(f"{get_local_time()} - {file_name} {e.__class__} {e}")
         finally:
             queue.task_done()
 
 
-# @events.register(events.NewMessage(pattern='/start', from_users=admin_id))
 async def handler(name):
     try:
-    # text = update.message.text.split(' ')
-
-    # msg = '参数错误，请按照参考格式输入:\n\n' \
-    #       '1.普通群组\n' \
-    #       '<i>/start https://t.me/fkdhlg 0 </i>\n\n' \
-    #       '2.私密群组(频道) 链接为随便复制一条群组消息链接\n' \
-    #       '<i>/start https://t.me/12000000/1 0 </i>\n\n' \
-    #       'Tips:如果不输入offset_id，默认从第一条开始下载'
-    # if len(text) == 1:
-    #     await bot.send_message(admin_id, msg, parse_mode='HTML')
-    #     return
-    # elif len(text) == 2:
-    #     chat_id = text[1]
-    #     offset_id = 0
-    #     try:
-    #         entity = await client.get_entity(chat_id)
-    #         chat_title = entity.title
-    #         await update.reply('开始下载')
-    #     except ValueError:
-    #         channel_id = text[1].split('/')[4]
-    #         entity = await client.get_entity(PeerChannel(int(channel_id)))
-    #         chat_title = entity.title
-    #         await update.reply(f'开始从第 {0} 条消息下载')
-    #     except Exception as e:
-    #         await update.reply('chat输入错误，请输入频道或群组的链接\n\n'
-    #                            f'错误类型：{e.__class__}'
-    #                            f'异常消息：{e}')
-    #         return
-    # elif len(text) == 3:
         print("start hander")
         chat_id = 'https://t.me/losslessflac'
         offset_id = 0
