@@ -18,21 +18,21 @@ save_path = 'D:\\ttt'  # file save path
 upload_file_set = False  # set upload file to google drive
 drive_id = '5FyJClXmsqNw0-Rz19'  # google teamdrive id 如果使用OD，删除''内的内容即可。
 drive_name = 'gc'  # rclone drive name
-max_num = 5  # 同时下载数量
-maxsize = 10*max_num
+max_num = 1  # 同时下载数量
+maxsize = 10 * max_num
 # filter file name/文件名过滤
 filter_list = ['你好，欢迎加入 Quantumu', '\n']
 # filter chat id /过滤某些频道不下载
 blacklist = [1388464914, ]
 download_all_chat = False  # 监控所有你加入的频道，收到的新消息如果包含媒体都会下载，默认关闭
 filter_file_name = []  # 过滤文件后缀，可以填jpg、avi、mkv、rar等。
-# proxy = ("socks5", '127.0.0.1', 1080)  # 自行替换代理设置，如果不需要代理，请删除括号内容
 proxy = ("http", '127.0.0.1', 1081)  # 自行替换代理设置，如果不需要代理，请删除括号内容
 # ***********************************************************************************#
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.ERROR)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s',
+                    level=logging.WARNING)
 logger = logging.getLogger(__name__)
+
 queue = asyncio.Queue(maxsize=maxsize)
 
 
@@ -47,11 +47,12 @@ def validate_title(title):
 async def get_group_caption(message):
     group_caption = ""
     entity = await client.get_entity(message.to_id)
-    async for msg in client.iter_messages(entity=entity, reverse=True, offset_id=message.id - 9, limit=10):
+    async for msg in client.iter_messages(entity=entity, reverse=False, offset_id=message.id - 9, limit=10):
         if msg.grouped_id == message.grouped_id:
             if msg.text != "":
                 group_caption = msg.text
                 return group_caption
+    print('group_caption', group_caption)
     return group_caption
 
 
@@ -103,13 +104,15 @@ def check_file_exist(filename):
 
 async def worker(name):
     while True:
-        print("拿到文件")
         queue_item = await queue.get()
-        message = queue_item[0]
-        chat_title = queue_item[1]
-        entity = queue_item[2]
-        file_name = queue_item[3]
-        offset_id = queue_item[4]
+        message, chat_title, entity, file_name, offset_id = queue_item
+        # print("message, chat_title, entity, file_name, offset_id", message, chat_title, entity, file_name, offset_id)
+        # chat_title = queue_item[1]
+        # entity = queue_item[2]
+        # file_name = queue_item[3]
+        # offset_id = queue_item[4]
+        await asyncio.sleep(100)
+        continue
         for filter_file in filter_file_name:
             if file_name.endswith(filter_file):
                 return
@@ -144,71 +147,126 @@ async def worker(name):
             queue.task_done()
 
 
-async def handler(name):
+async def get_entity(chat_id):
+    # get channel info
     try:
-        print("start hander")
-        chat_id = 'https://t.me/losslessflac'
-        offset_id = 0
-        try:
-            entity = await client.get_entity(chat_id)
-            chat_title = entity.title
-            print(f'开始从第 {offset_id} 条消息下载')
-        except ValueError:
-            channel_id = chat_id.split('/')[-1]
+        channel_id = chat_id.split('/')[-1]
+
+        if channel_id.isdigit():
             entity = await client.get_entity(PeerChannel(int(channel_id)))
-            chat_title = entity.title
-            print(f'开始从第 {offset_id} 条消息下载')
-        except Exception as e:
-            print('chat输入错误，请输入频道或群组的链接\n\n'
-                               f'错误类型：{type(e).__class__}'
-                               f'异常消息：{e}')
-            return
-        if chat_title:
-            print(f'{get_local_time()} - 开始下载：({entity.id}) - {offset_id}')
-            last_msg_id = 0
-            async for message in client.iter_messages(entity, offset_id=offset_id, reverse=True, limit=None):
-                if message.media:
-                    # 如果是一组媒体
-                    caption = await get_group_caption(message) if (
-                            message.grouped_id and message.text == "") else message.text
-                    # 过滤文件名称中的广告等词语
-                    if len(filter_list) and caption != "":
-                        for filter_keyword in filter_list:
-                            caption = caption.replace(filter_keyword, "")
-                    # 如果文件文件名不是空字符串，则进行过滤和截取，避免文件名过长导致的错误
-                    caption = "" if caption == "" else f'{validate_title(caption)} - '[
-                                                       :50]
-                    file_name = ''
-                    # 如果是文件
-                    if message.document:
-                        if type(message.media) == MessageMediaWebPage:
-                            continue
-                        if message.media.document.mime_type == "image/webp":
-                            continue
-                        if message.media.document.mime_type == "application/x-tgsticker":
-                            continue
-                        for i in message.document.attributes:
-                            try:
-                                file_name = i.file_name
-                            except:
-                                continue
-                        if file_name == '':
-                            file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
-                        else:
-                            # 如果文件名中已经包含了标题，则过滤标题
-                            if get_equal_rate(caption, file_name) > 0.6:
-                                caption = ""
-                            file_name = f'{message.id} - {caption}{file_name}'
-                    elif message.photo:
-                        file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
-                    else:
-                        continue
-                    await queue.put((message, chat_title, entity, file_name, message.id))
-                    last_msg_id = message.id
-            print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
+        else:
+            entity = await client.get_entity(chat_id)
+
+        return entity
     except Exception as e:
-        print("get error", e)
-        exit(-1)
+        raise ValueError(f'chat_id incorrect, check and run again\r\nerror info：{e}')
+
+
+# async def add_job_to_queue(entity, offset_id):
+#     try:
+#         last_msg_id = 0
+#         async for message in client.iter_messages(entity, offset_id=offset_id, reverse=True, limit=None):
+#             if message.media:
+#                 # 如果是一组媒体
+#                 caption = await get_group_caption(message) if (
+#                         message.grouped_id and message.text == "") else message.text
+#                 # 过滤文件名称中的广告等词语
+#                 if len(filter_list) and caption != "":
+#                     for filter_keyword in filter_list:
+#                         caption = caption.replace(filter_keyword, "")
+#                 # 如果文件文件名不是空字符串，则进行过滤和截取，避免文件名过长导致的错误
+#                 caption = "" if caption == "" else f'{validate_title(caption)} - '[
+#                                                    :50]
+#                 file_name = ''
+#                 # 如果是文件
+#                 if message.document:
+#                     if type(message.media) == MessageMediaWebPage:
+#                         continue
+#                     if message.media.document.mime_type == "image/webp":
+#                         continue
+#                     if message.media.document.mime_type == "application/x-tgsticker":
+#                         continue
+#                     for i in message.document.attributes:
+#                         try:
+#                             file_name = i.file_name
+#                         except:
+#                             continue
+#                     if file_name == '':
+#                         file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
+#                     else:
+#                         # 如果文件名中已经包含了标题，则过滤标题
+#                         if get_equal_rate(caption, file_name) > 0.6:
+#                             caption = ""
+#                         file_name = f'{message.id} - {caption}{file_name}'
+#                 elif message.photo:
+#                     file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
+#                 else:
+#                     continue
+#                 await queue.put((message, chat_title, entity, file_name, message.id))
+#                 last_msg_id = message.id
+#         print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
+#     except Exception as e:
+#         print("e", e)
+
+
+async def handler(name='handler'):
+    try:
+        chat_id = 'https://t.me/Remux_2160P'
+        offset_id = 0
+
+        entity = await get_entity(chat_id)
+        chat_title = entity.title
+        logging.warning(f'start download ({chat_title}) from offset ({offset_id})')
+        last_msg_id = 0
+        # TODO: add reverse download, use reverse config
+        async for message in client.iter_messages(entity, offset_id=offset_id, reverse=False, limit=None):
+            if message.media:
+                print("media yes", message.grouped_id, message.text)
+                # 如果是一组媒体
+                print("text", message.text, type(message.text))
+                caption = validate_title(message.text)
+
+                # 如果文件文件名不是空字符串，则进行过滤和截取，避免文件名过长导致的错误
+                caption = "" if caption == "" else f'{validate_title(caption)} - '[
+                                                   :50]
+                file_name = ''
+                # 如果是文件
+                if message.document:
+                    print("document yes", message.media.document.mime_type)
+                    if type(message.media) == MessageMediaWebPage:
+                        continue
+                    if message.media.document.mime_type == "image/webp":
+                        print("image, continue")
+                        continue
+                    if message.media.document.mime_type == "application/x-tgsticker":
+                        print("image, x-tgsticker")
+
+                        continue
+                    for i in message.document.attributes:
+                        print("attributes", message.document.attributes)
+                        try:
+                            file_name = i.file_name
+                            print('attributes filename', i.file_name)
+                        except:
+                            continue
+                    if file_name == '':
+                        file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
+                        print("filename", file_name)
+                        print("caption", caption, message.document.mime_type.split("/")[-1])
+                    else:
+                        # 如果文件名中已经包含了标题，则过滤标题
+                        file_name = f'{message.id} - {caption}{file_name}'
+                elif message.photo:
+                    print("photo yes")
+                    file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
+                else:
+                    print('other type')
+                    continue
+                # await queue.put((message, chat_title, entity, file_name, message.id))
+                last_msg_id = message.id
+        print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
+    except Exception as e:
+        print(e)
 
 
 @events.register(events.NewMessage())
@@ -218,11 +276,13 @@ async def all_chat_download(update):
         chat_id = update.message.to_id
         entity = await client.get_entity(chat_id)
         if entity.id in blacklist:
+            logging.warning(f'entity ({entity.id}) in black list, pass')
             return
         chat_title = entity.title
         # 如果是一组媒体
         caption = await get_group_caption(message) if (
                 message.grouped_id and message.text == "") else message.text
+        print("caption", caption)
         if caption != "":
             for fw in filter_list:
                 caption = caption.replace(fw, '')
@@ -266,20 +326,16 @@ async def all_chat_download(update):
 if __name__ == '__main__':
     client = TelegramClient(
         'telegram_channel_downloader', api_id, api_hash, proxy=proxy).start()
-    # if download_all_chat:
-    #     client.add_event_handler(all_chat_download)
     tasks = []
     try:
         loop = asyncio.get_event_loop()
-        for i in range(max_num):
-            task = loop.create_task(worker(f'worker-{i}'))
-            tasks.append(task)
-        print('Successfully started (Press Ctrl+C to stop)')
-        loop.create_task(handler(1))
-        # handler()
+        # for i in range(max_num):
+        #     task = loop.create_task(worker(f'worker-{i}'))
+        #     tasks.append(task)
+        # print('worker ready,waiting for download')
 
+        loop.create_task(handler())
         client.run_until_disconnected()
-        print("after run until")
     finally:
         for task in tasks:
             task.cancel()
