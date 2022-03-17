@@ -220,51 +220,56 @@ async def handler(name='handler'):
         last_msg_id = 0
         # TODO: add reverse download, use reverse config
         async for message in client.iter_messages(entity, offset_id=offset_id, reverse=False, limit=None):
-            if message.media:
-                print("media yes", message.grouped_id, message.text)
-                # 如果是一组媒体
-                print("text", message.text, type(message.text))
-                caption = validate_title(message.text)
+            media = message.media
+            if not media:
+                return
+            print('message type', message.grouped_id, message.media)
+            print("media yes", message.grouped_id, message.text)
+            # 如果是一组媒体
+            print("text", message.text, type(message.text))
+            caption = validate_title(message.text)
 
-                # 如果文件文件名不是空字符串，则进行过滤和截取，避免文件名过长导致的错误
-                caption = "" if caption == "" else f'{validate_title(caption)} - '[
-                                                   :50]
-                file_name = ''
-                # 如果是文件
-                if message.document:
-                    print("document yes", message.media.document.mime_type)
-                    if type(message.media) == MessageMediaWebPage:
-                        continue
-                    if message.media.document.mime_type == "image/webp":
-                        print("image, continue")
-                        continue
-                    if message.media.document.mime_type == "application/x-tgsticker":
-                        print("image, x-tgsticker")
-
-                        continue
-                    for i in message.document.attributes:
-                        print("attributes", message.document.attributes)
-                        try:
-                            file_name = i.file_name
-                            print('attributes filename', i.file_name)
-                        except:
-                            continue
-                    if file_name == '':
-                        file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
-                        print("filename", file_name)
-                        print("caption", caption, message.document.mime_type.split("/")[-1])
-                    else:
-                        # 如果文件名中已经包含了标题，则过滤标题
-                        file_name = f'{message.id} - {caption}{file_name}'
-                elif message.photo:
-                    print("photo yes")
-                    file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
-                else:
-                    print('other type')
+            # 如果文件文件名不是空字符串，则进行过滤和截取，避免文件名过长导致的错误
+            caption = "" if caption == "" else f'{validate_title(caption)} - '[
+                                               :50]
+            file_name = ''
+            # 如果是文件
+            if message.document:
+                print("document yes", message.media.document.mime_type)
+                if type(message.media) == MessageMediaWebPage:
                     continue
-                # await queue.put((message, chat_title, entity, file_name, message.id))
-                last_msg_id = message.id
-        print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
+                if message.media.document.mime_type == "image/webp":
+                    print("image, continue")
+                    continue
+                if message.media.document.mime_type == "application/x-tgsticker":
+                    print("image, x-tgsticker")
+
+                    continue
+                for i in message.document.attributes:
+                    print("attributes", message.document.attributes)
+                    try:
+                        file_name = i.file_name
+                        print('attributes filename', i.file_name)
+                    except:
+                        continue
+                if file_name == '':
+                    file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
+                    print("filename", file_name)
+                    print("caption", caption, message.document.mime_type.split("/")[-1])
+                else:
+                    # 如果文件名中已经包含了标题，则过滤标题
+                    file_name = f'{message.id} - {caption}{file_name}'
+            elif message.photo:
+                print("photo yes", message.media)
+                file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
+                print("photo name", file_name)
+                # exit(0)
+            else:
+                print('other type')
+                continue
+            # await queue.put((message, chat_title, entity, file_name, message.id))
+            last_msg_id = message.id
+    print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
     except Exception as e:
         print(e)
 
