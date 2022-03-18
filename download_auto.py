@@ -7,7 +7,7 @@ import asyncio
 import asyncio.subprocess
 import logging
 from telethon import TelegramClient, events, errors
-from telethon.tl.types import MessageMediaWebPage, PeerChannel
+from telethon.tl.types import MessageMediaWebPage, PeerChannel, MessageMediaPoll, DocumentAttributeAnimated
 
 # ***********************************************************************************#
 api_id = 9944743  # your telegram api id
@@ -36,11 +36,25 @@ logger = logging.getLogger(__name__)
 queue = asyncio.Queue(maxsize=maxsize)
 
 
-# 文件夹/文件名称处理
+def format_time(unix_time):
+    date_time = unix_time.strftime("%Y-%d-%m %H:%M:%S")
+    return date_time
+
+
+# replace invalid characters, limit max length in 15
 def validate_title(title):
     r_str = r"[\/\\\:\*\?\"\<\>\|\n]"  # '/ \ : * ? " < > |'
     new_title = re.sub(r_str, "_", title)  # 替换为下划线
-    return new_title
+    return new_title[:15]
+
+
+class customMessage:
+    def __init__(self, message, group_id=None, file_name='', text='', ):
+        self.message = message
+        self.file_name = file_name
+        self.text = text
+        self.group_id = group_id
+        self.mime_type = None
 
 
 # 获取相册标题
@@ -207,11 +221,35 @@ async def get_entity(chat_id):
 #         print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
 #     except Exception as e:
 #         print("e", e)
+async def process_filename(media, media_type):
+    media_type = media.document.mime_type
+    filename = f'{media.id} - '
+    pass
+
+
+async def process_group_media(medias, text):
+    base_filename = validate_title(text)
+    for media in medias:
+        filename = f'{media.id} - {base_filename} - '
+
+
+async def add_to_queue(c):
+    return await queue.put((c.message, c.chat_title, c.entity, c.file_name, c.message.id))
+
+
+def check_media(message):
+    if not message.media:
+        return False
+    media = message.media
+    if isinstance(media, MessageMediaPoll) or isinstance(media, DocumentAttributeAnimated):
+        return False
+    return True
 
 
 async def handler(name='handler'):
     try:
-        chat_id = 'https://t.me/Remux_2160P'
+        # chat_id = 'https://t.me/losslessflac'
+        chat_id = 'https://t.me/musicalossless'
         offset_id = 0
 
         entity = await get_entity(chat_id)
@@ -219,57 +257,39 @@ async def handler(name='handler'):
         logging.warning(f'start download ({chat_title}) from offset ({offset_id})')
         last_msg_id = 0
         # TODO: add reverse download, use reverse config
-        async for message in client.iter_messages(entity, offset_id=offset_id, reverse=False, limit=None):
-            media = message.media
-            if not media:
-                return
-            print('message type', message.grouped_id, message.media)
-            print("media yes", message.grouped_id, message.text)
-            # 如果是一组媒体
-            print("text", message.text, type(message.text))
-            caption = validate_title(message.text)
-
-            # 如果文件文件名不是空字符串，则进行过滤和截取，避免文件名过长导致的错误
-            caption = "" if caption == "" else f'{validate_title(caption)} - '[
-                                               :50]
-            file_name = ''
-            # 如果是文件
-            if message.document:
-                print("document yes", message.media.document.mime_type)
-                if type(message.media) == MessageMediaWebPage:
-                    continue
-                if message.media.document.mime_type == "image/webp":
-                    print("image, continue")
-                    continue
-                if message.media.document.mime_type == "application/x-tgsticker":
-                    print("image, x-tgsticker")
-
-                    continue
-                for i in message.document.attributes:
-                    print("attributes", message.document.attributes)
-                    try:
-                        file_name = i.file_name
-                        print('attributes filename', i.file_name)
-                    except:
-                        continue
-                if file_name == '':
-                    file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
-                    print("filename", file_name)
-                    print("caption", caption, message.document.mime_type.split("/")[-1])
-                else:
-                    # 如果文件名中已经包含了标题，则过滤标题
-                    file_name = f'{message.id} - {caption}{file_name}'
-            elif message.photo:
-                print("photo yes", message.media)
-                file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
-                print("photo name", file_name)
-                # exit(0)
-            else:
-                print('other type')
+        message_iter = client.iter_messages(entity, offset_id=offset_id, reverse=False, limit=None)
+        async for message in message_iter:
+            if not check_media(message):
                 continue
+            photo = message.photo
+            document = message.document
+            grouped_id = message.grouped_id
+
+            custom_message = customMessage(message=message, group_id=grouped_id, text=message.text[:15])
+            if photo:
+                base_name = format_time(photo.date)
+                custom_message.file_name = f'{message.id} - {base_name}.jpg'
+            if document:
+                custom_message.file_name = document.attributes[-1].file_name
+            # if message.document:
+            #     print("document yes", message.media.document.mime_type)
+            #     if type(message.media) == MessageMediaWebPage:
+            #         continue
+            #     if message.media.document.mime_type == "image/webp":
+            #         print("image, continue")
+            #         continue
+            #     if message.media.document.mime_type == "application/x-tgsticker":
+            #         print("image, x-tgsticker")
+            #
+            #         continue
+            if custom_message.file_name == '':
+                print("filename empty")
+                print("empty media", message)
+                # custom_message.file_name = f'{message.id} - {message.document.mime_type.split("/")[-1]}'
+            # await add_to_queue(custom_message)
             # await queue.put((message, chat_title, entity, file_name, message.id))
             last_msg_id = message.id
-    print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
+        print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
     except Exception as e:
         print(e)
 
