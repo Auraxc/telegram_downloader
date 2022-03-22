@@ -7,7 +7,8 @@ import asyncio
 import asyncio.subprocess
 import logging
 from telethon import TelegramClient, events, errors
-from telethon.tl.types import MessageMediaWebPage, PeerChannel, MessageMediaPoll, DocumentAttributeAnimated
+from telethon.tl.types import MessageMediaWebPage, PeerChannel, MessageMediaPoll, DocumentAttributeAnimated, \
+    MessageMediaDocument, DocumentAttributeVideo
 
 # ***********************************************************************************#
 api_id = 9944743  # your telegram api id
@@ -25,7 +26,7 @@ filter_list = ['你好，欢迎加入 Quantumu', '\n']
 # filter chat id /过滤某些频道不下载
 blacklist = [1388464914, ]
 download_all_chat = False  # 监控所有你加入的频道，收到的新消息如果包含媒体都会下载，默认关闭
-filter_file_name = []  # 过滤文件后缀，可以填jpg、avi、mkv、rar等。
+filter_suffixes = []  # 过滤文件后缀，可以填jpg、avi、mkv、rar等。
 proxy = ("http", '127.0.0.1', 1081)  # 自行替换代理设置，如果不需要代理，请删除括号内容
 # ***********************************************************************************#
 
@@ -52,9 +53,6 @@ class customMessage:
     def __init__(self, message, group_id=None, file_name='', text='', ):
         self.message = message
         self.file_name = file_name
-        self.text = text
-        self.group_id = group_id
-        self.mime_type = None
 
 
 # 获取相册标题
@@ -120,24 +118,20 @@ async def worker(name):
     while True:
         queue_item = await queue.get()
         message, chat_title, entity, file_name, offset_id = queue_item
-        # print("message, chat_title, entity, file_name, offset_id", message, chat_title, entity, file_name, offset_id)
+        message, file_name, offset_id = queue_item
         # chat_title = queue_item[1]
         # entity = queue_item[2]
         # file_name = queue_item[3]
         # offset_id = queue_item[4]
-        await asyncio.sleep(100)
-        continue
-        for filter_file in filter_file_name:
-            if file_name.endswith(filter_file):
-                return
+
         dirname = validate_title(f'({entity.id})')
-        datetime_dir_name = message.date.strftime("%Ya年%m月")
+        datetime_dir_name = message.date.strftime("%Ya - %m")
         file_save_path = os.path.join(save_path, dirname, datetime_dir_name)
         if not os.path.exists(file_save_path):
             os.makedirs(file_save_path)
-        # 判断文件是否在本地存在
+
         if check_file_exist(file_name):
-            print("{} 已下载, 跳过".format(offset_id))
+            print("{} finished, pass".format(offset_id))
             continue
         else:
             if file_name in os.listdir(file_save_path):
@@ -152,8 +146,6 @@ async def worker(name):
 
         except (errors.rpc_errors_re.FileReferenceExpiredError, asyncio.TimeoutError):
             logging.warning(f'{get_local_time()} - {offset_id} 出现异常，重新尝试下载！')
-            # async for new_message in client.iter_messages(entity=entity, offset_id=message.id - 1, reverse=True,
-            #                                               limit=1):
             await queue.put((message, chat_title, entity, file_name, message.id))
         except Exception as e:
             print(f"{get_local_time()} - {file_name} {e.__class__} {e}")
@@ -237,13 +229,63 @@ async def add_to_queue(c):
     return await queue.put((c.message, c.chat_title, c.entity, c.file_name, c.message.id))
 
 
-def check_media(message):
+def filename_filter(filename):
+    filters = ['sticker.webp']
+    if filename in filters:
+        return False
+    for suffix in filter_suffixes:
+        if filename.endswith(suffix):
+            return False
+    return filename
+
+
+def _create_filename(message):
+    photo = message.photo
+    document = message.document
+    grouped_id = message.grouped_id
+    filename = ''
+    if photo:
+        base_name = format_time(photo.date)
+        filename = f'{message.id} - {base_name}.jpg'
+        if grouped_id:
+            filename = f"{grouped_id} - {filename}"
+    elif document:
+        filename = f'{message.id} - {document.attributes[-1].file_name}'
+    filename = filename_filter(filename)
+    return filename
+
+
+def filename_from_media(message):
     if not message.media:
         return False
     media = message.media
-    if isinstance(media, MessageMediaPoll) or isinstance(media, DocumentAttributeAnimated):
+    if isinstance(media, MessageMediaDocument):
+        attribute = media.document.attributes[-1]
+        if isinstance(attribute, DocumentAttributeAnimated) or isinstance(attribute, DocumentAttributeVideo):
+            return False
+    if isinstance(media, MessageMediaPoll):
         return False
-    return True
+    filename = _create_filename(message)
+    return filename
+
+
+def download_path(entity, message, filename):
+    dirname = validate_title(f'{entity.title}({entity.id})')
+    datetime_dir_name = message.date.strftime("%Ya - %m")
+    file_save_path = os.path.join(save_path, dirname, datetime_dir_name)
+    if not os.path.exists(file_save_path):
+        os.makedirs(file_save_path)
+
+    download_path = os.path.join(file_save_path, filename)
+
+    if check_file_exist(filename):
+        print("{} finished, pass".format(filename))
+        return False
+    else:
+        if os.path.exists(download_path):
+            os.remove(download_path)
+        # os.remove(os.path.join(file_save_path, file_name))
+    return download_path
 
 
 async def handler(name='handler'):
@@ -259,35 +301,12 @@ async def handler(name='handler'):
         # TODO: add reverse download, use reverse config
         message_iter = client.iter_messages(entity, offset_id=offset_id, reverse=False, limit=None)
         async for message in message_iter:
-            if not check_media(message):
-                continue
-            photo = message.photo
-            document = message.document
-            grouped_id = message.grouped_id
-
-            custom_message = customMessage(message=message, group_id=grouped_id, text=message.text[:15])
-            if photo:
-                base_name = format_time(photo.date)
-                custom_message.file_name = f'{message.id} - {base_name}.jpg'
-            if document:
-                custom_message.file_name = document.attributes[-1].file_name
-            # if message.document:
-            #     print("document yes", message.media.document.mime_type)
-            #     if type(message.media) == MessageMediaWebPage:
-            #         continue
-            #     if message.media.document.mime_type == "image/webp":
-            #         print("image, continue")
-            #         continue
-            #     if message.media.document.mime_type == "application/x-tgsticker":
-            #         print("image, x-tgsticker")
-            #
-            #         continue
-            if custom_message.file_name == '':
-                print("filename empty")
-                print("empty media", message)
-                # custom_message.file_name = f'{message.id} - {message.document.mime_type.split("/")[-1]}'
-            # await add_to_queue(custom_message)
-            # await queue.put((message, chat_title, entity, file_name, message.id))
+            filename = filename_from_media(message)
+            if filename:
+                path = download_path(entity, message, filename)
+                if path:
+                    await queue.put((message, download_path, message.id))
+                    # custom_message = customMessage(message=message, text=message.text[:15])
             last_msg_id = message.id
         print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
     except Exception as e:
