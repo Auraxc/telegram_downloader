@@ -1,8 +1,7 @@
 # !/usr/bin/env python3
-import difflib
+
 import os
-import re
-import time
+
 import asyncio
 import asyncio.subprocess
 import logging
@@ -11,6 +10,8 @@ from telethon.tl.types import MessageMediaWebPage, PeerChannel, MessageMediaPoll
     MessageMediaDocument, DocumentAttributeVideo
 
 # ***********************************************************************************#
+from utils import validate_title, check_file_exist, get_local_time, format_time, get_equal_rate
+
 api_id = 9944743  # your telegram api id
 api_hash = 'f8075591229309e1e10f0502efc48a52'  # your telegram api hash
 bot_token = '5276878860:AAGMbIbHgaIScfS4_wcticgSTMVKn8kRFac'  # your bot_token
@@ -37,22 +38,12 @@ logger = logging.getLogger(__name__)
 queue = asyncio.Queue(maxsize=maxsize)
 
 
-def format_time(unix_time):
-    date_time = unix_time.strftime("%Y-%d-%m %H:%M:%S")
-    return date_time
-
-
-# replace invalid characters, limit max length in 15
-def validate_title(title):
-    r_str = r"[\/\\\:\*\?\"\<\>\|\n]"  # '/ \ : * ? " < > |'
-    new_title = re.sub(r_str, "_", title)  # 替换为下划线
-    return new_title[:15]
-
-
 class customMessage:
     def __init__(self, message, group_id=None, file_name='', text='', ):
         self.message = message
         self.file_name = file_name
+        self.group_id = group_id
+        self.text = text
 
 
 # 获取相册标题
@@ -68,28 +59,6 @@ async def get_group_caption(message):
     return group_caption
 
 
-# 获取本地时间
-def get_local_time():
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-
-# 判断相似率
-def get_equal_rate(str1, str2):
-    return difflib.SequenceMatcher(None, str1, str2).quick_ratio()
-
-
-# 返回文件大小
-def bytes_to_string(byte_count):
-    suffix_index = 0
-    while byte_count >= 1024:
-        byte_count /= 1024
-        suffix_index += 1
-
-    return '{:.2f}{}'.format(
-        byte_count, [' bytes', 'KB', 'MB', 'GB', 'TB'][suffix_index]
-    )
-
-
 def save_success(filename, offset_id=None):
     print("download finished", offset_id)
     with open("download_success.txt", "a+", encoding='utf8') as f:
@@ -97,24 +66,7 @@ def save_success(filename, offset_id=None):
         return
 
 
-def read_file(path, mode):
-    try:
-        with open(path, mode, encoding='utf8') as f:
-            return f.read()
-    except FileNotFoundError as e:
-        return ""
-
-
-def check_file_exist(filename):
-    text = read_file('download_success.txt', 'r')
-    index = text.find(filename)
-    if index != -1:
-        print("file exist")
-        return True
-    return False
-
-
-async def worker(name):
+async def worker():
     while True:
         queue_item = await queue.get()
         message, chat_title, entity, file_name, offset_id = queue_item
@@ -140,8 +92,8 @@ async def worker(name):
         print(f"{get_local_time()} 开始下载 {offset_id}")
         try:
             print(f"start download {offset_id}")
-            download_path = os.path.join(file_save_path, file_name)
-            await client.download_media(message, download_path)
+            _download_path = os.path.join(file_save_path, file_name)
+            await client.download_media(message, _download_path)
             print(f"stop download {offset_id}")
 
         except (errors.rpc_errors_re.FileReferenceExpiredError, asyncio.TimeoutError):
@@ -213,16 +165,16 @@ async def get_entity(chat_id):
 #         print(admin_id, f'all message added to task queue, last message is：{last_msg_id}')
 #     except Exception as e:
 #         print("e", e)
-async def process_filename(media, media_type):
-    media_type = media.document.mime_type
-    filename = f'{media.id} - '
-    pass
+# async def process_filename(media, media_type):
+#     media_type = media.document.mime_type
+#     filename = f'{media.id} - '
+#     pass
 
 
-async def process_group_media(medias, text):
-    base_filename = validate_title(text)
-    for media in medias:
-        filename = f'{media.id} - {base_filename} - '
+# async def process_group_media(medias, text):
+#     base_filename = validate_title(text)
+#     for media in medias:
+#         filename = f'{media.id} - {base_filename} - '
 
 
 async def add_to_queue(c):
@@ -276,16 +228,16 @@ def download_path(entity, message, filename):
     if not os.path.exists(file_save_path):
         os.makedirs(file_save_path)
 
-    download_path = os.path.join(file_save_path, filename)
+    _download_path = os.path.join(file_save_path, filename)
 
     if check_file_exist(filename):
         print("{} finished, pass".format(filename))
         return False
     else:
-        if os.path.exists(download_path):
-            os.remove(download_path)
+        if os.path.exists(_download_path):
+            os.remove(_download_path)
         # os.remove(os.path.join(file_save_path, file_name))
-    return download_path
+    return _download_path
 
 
 async def handler(name='handler'):
@@ -296,7 +248,7 @@ async def handler(name='handler'):
 
         entity = await get_entity(chat_id)
         chat_title = entity.title
-        logging.warning(f'start download ({chat_title}) from offset ({offset_id})')
+        logging.info(f'start download ({chat_title}) from offset ({offset_id})')
         last_msg_id = 0
         # TODO: add reverse download, use reverse config
         message_iter = client.iter_messages(entity, offset_id=offset_id, reverse=False, limit=None)
@@ -345,7 +297,8 @@ async def all_chat_download(update):
                 for i in message.document.attributes:
                     try:
                         file_name = i.file_name
-                    except:
+                    except Exception as e:
+                        print("error", e)
                         continue
                 if file_name == '':
                     file_name = f'{message.id} - {caption}.{message.document.mime_type.split("/")[-1]}'
@@ -354,8 +307,8 @@ async def all_chat_download(update):
                     if get_equal_rate(caption, file_name) > 0.6:
                         caption = ""
                     file_name = f'{message.id} - {caption}{file_name}'
-            except:
-                print(message.media)
+            except Exception as e:
+                print(message.media, e)
         elif message.photo:
             file_name = f'{message.id} - {caption}{message.photo.id}.jpg'
         else:
